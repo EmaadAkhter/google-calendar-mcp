@@ -1,13 +1,14 @@
-// src/index-simple.ts
+import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { AuthkitHandler } from "./authkit-handler";
 import type { Props } from "./props";
 import { registerDateTool } from "./tools/date";
 import { setupAppointmentTools } from "./tools/appointment";
 import { registerEmailTools } from "./tools/mail";
 import { CalendarReminderService } from "./automation/calendarreminder";
-import { Hono } from "hono";
 
+// Define the Env type to match wrangler.json bindings
 type Env = { 
   AI: any;
   GOOGLE_ACCESS_TOKEN: string;
@@ -19,7 +20,7 @@ type Env = {
 
 export class MyMCP extends McpAgent<Env, unknown, Props> {
   server = new McpServer({
-    name: "Google Calendar MCP (Simple)",
+    name: "MCP server demo using AuthKit",
     version: "1.0.0",
   });
 
@@ -30,12 +31,14 @@ export class MyMCP extends McpAgent<Env, unknown, Props> {
     registerDateTool(this.server);
     setupAppointmentTools(this.server, this.env);
     registerEmailTools(this.server);
+ 
 
     // Initialize and start the calendar reminder service
     this.reminderService = new CalendarReminderService(this.env);
     await this.reminderService.startReminderAutomation();
   }
 
+  // Clean up when the server shuts down
   async cleanup() {
     if (this.reminderService) {
       await this.reminderService.cleanup();
@@ -44,26 +47,11 @@ export class MyMCP extends McpAgent<Env, unknown, Props> {
   }
 }
 
-// Simple Hono app without OAuth
-const app = new Hono<{ Bindings: Env }>();
-
-// Health check endpoint
-app.get("/", (c) => {
-  return c.json({ 
-    status: "ok", 
-    message: "Google Calendar MCP Server",
-    endpoints: {
-      sse: "/sse",
-      health: "/health"
-    }
-  });
+export default new OAuthProvider({
+  apiRoute: "/sse",
+  apiHandler: MyMCP.mount("/sse") as any,
+  defaultHandler: AuthkitHandler as any,
+  authorizeEndpoint: "/authorize",
+  tokenEndpoint: "/token",
+  clientRegistrationEndpoint: "/register",
 });
-
-app.get("/health", (c) => {
-  return c.json({ status: "healthy", timestamp: new Date().toISOString() });
-});
-
-// Mount MCP SSE endpoint directly (no OAuth)
-app.all("/sse/*", MyMCP.mount("/sse") as any);
-
-export default app;
